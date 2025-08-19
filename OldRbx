@@ -1,0 +1,276 @@
+--// old roblox animations & physics script! \\--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players:GetPlayers()[1]
+local char = player.Character or player.CharacterAdded:Wait()
+local humanoid = char:WaitForChild("Humanoid")
+local torso = char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+local head = char:FindFirstChild("Head")
+
+local function waitForChild(parent, childName)
+    local child = parent:FindFirstChild(childName)
+    if child then return child end
+    repeat
+        child = parent.ChildAdded:Wait()
+    until child.Name == childName
+    return child
+end
+
+local function newSound(id)
+    local sound = Instance.new("Sound")
+    sound.SoundId = id
+    sound.Archivable = false
+    sound.Parent = head
+    return sound
+end
+
+local sDied = newSound("rbxasset://sounds/uuhhh.wav")
+local sFallingDown = newSound("rbxasset://sounds/splat.wav")
+local sFreeFalling = newSound("rbxasset://sounds/swoosh.wav")
+local sGettingUp = newSound("rbxasset://sounds/hit.wav")
+local sJumping = newSound("rbxasset://sounds/button.wav")
+
+local function updateTeamColors()
+    if char then
+        if player.Neutral then
+            local bodyColors = char:FindFirstChild("Body Colors")
+            if bodyColors then
+                local newBC = bodyColors:Clone()
+                newBC.Parent = char
+                bodyColors:Destroy()
+            end
+        else
+            if head then head.BrickColor = BrickColor.new(24) end
+            if torso then torso.BrickColor = player.TeamColor end
+            local limbs = {"Left Arm","Right Arm","Left Leg","Right Leg"}
+            for _, name in ipairs(limbs) do
+                local part = char:FindFirstChild(name)
+                if part then part.BrickColor = BrickColor.new(26) end
+            end
+        end
+    end
+end
+
+player:GetPropertyChangedSignal("TeamColor"):Connect(updateTeamColors)
+player:GetPropertyChangedSignal("Neutral"):Connect(updateTeamColors)
+updateTeamColors()
+
+humanoid.Died:Connect(function() sDied:Play() end)
+humanoid.Running:Connect(function(speed)
+    if speed > 0 then sRunning:Play() else sRunning:Pause() end
+end)
+humanoid.Jumping:Connect(function() sJumping:Play() end)
+humanoid.GettingUp:Connect(function() sGettingUp:Play() end)
+humanoid.FreeFalling:Connect(function() sFreeFalling:Play() end)
+humanoid.FallingDown:Connect(function() sFallingDown:Play() end)
+
+local torso = waitForChild(char, "Torso") or waitForChild(char,"UpperTorso")
+local rightShoulder = waitForChild(torso, "Right Shoulder")
+local leftShoulder = waitForChild(torso, "Left Shoulder")
+local rightHip = waitForChild(torso, "Right Hip")
+local leftHip = waitForChild(torso, "Left Hip")
+local neck = waitForChild(torso, "Neck")
+
+local pose = "Standing"
+local toolAnim = "None"
+local toolAnimTime = 0
+
+local function getTool()
+    for _, item in ipairs(char:GetChildren()) do
+        if item:IsA("Tool") then return item end
+    end
+end
+
+local function getToolAnim(tool)
+    for _, c in ipairs(tool:GetChildren()) do
+        if c.Name == "toolanim" and c:IsA("StringValue") then
+            return c
+        end
+    end
+end
+
+local function animateTool()
+    if toolAnim == "None" then
+        rightShoulder.DesiredAngle = 1.57
+        return
+    elseif toolAnim == "Slash" then
+        rightShoulder.MaxVelocity = 0.5
+        rightShoulder.DesiredAngle = 0
+        return
+    elseif toolAnim == "Lunge" then
+        rightShoulder.MaxVelocity = 0.5
+        leftShoulder.MaxVelocity = 0.5
+        rightHip.MaxVelocity = 0.5
+        leftHip.MaxVelocity = 0.5
+        rightShoulder.DesiredAngle = 1.57
+        leftShoulder.DesiredAngle = 1.0
+        rightHip.DesiredAngle = 1.57
+        leftHip.DesiredAngle = 1.0
+        return
+    end
+end
+
+local function move(time)
+    local amplitude, frequency, climbFudge = 0.1, 1, 0
+
+    if pose == "Jumping" or pose == "FreeFall" then
+        rightShoulder.MaxVelocity, leftShoulder.MaxVelocity = 0.5, 0.5
+        rightShoulder.DesiredAngle, leftShoulder.DesiredAngle = 3.14, -3.14
+        rightHip.DesiredAngle, leftHip.DesiredAngle = 0, 0
+        return
+    elseif pose == "Seated" then
+        rightShoulder.MaxVelocity, leftShoulder.MaxVelocity = 0.15, 0.15
+        rightShoulder.DesiredAngle, leftShoulder.DesiredAngle = 3.14/2, -3.14/2
+        rightHip.DesiredAngle, leftHip.DesiredAngle = 3.14/2, -3.14/2
+        return
+    elseif pose == "Running" then
+        rightShoulder.MaxVelocity, leftShoulder.MaxVelocity = 0.15, 0.15
+        amplitude, frequency = 1, 9
+    elseif pose == "Climbing" then
+        rightShoulder.MaxVelocity, leftShoulder.MaxVelocity = 0.5, 0.5
+        amplitude, frequency, climbFudge = 1, 9, 3.14
+    end
+
+    local desiredAngle = amplitude * math.sin(time * frequency)
+    rightShoulder.DesiredAngle = desiredAngle + climbFudge
+    leftShoulder.DesiredAngle = desiredAngle - climbFudge
+    rightHip.DesiredAngle = -desiredAngle
+    leftHip.DesiredAngle = -desiredAngle
+
+    local tool = getTool()
+    if tool then
+        local animVal = getToolAnim(tool)
+        if animVal then
+            toolAnim = animVal.Value
+            animVal:Destroy()
+            toolAnimTime = time + 0.3
+        end
+        if time > toolAnimTime then
+            toolAnim, toolAnimTime = "None", 0
+        end
+        animateTool()
+    else
+        toolAnim, toolAnimTime = "None", 0
+    end
+end
+
+humanoid.Died:Connect(function() pose = "Dead" end)
+humanoid.Running:Connect(function(speed) pose = (speed>0 and "Running") or "Standing" end)
+humanoid.Jumping:Connect(function() pose = "Jumping" end)
+humanoid.Climbing:Connect(function() pose = "Climbing" end)
+humanoid.GettingUp:Connect(function() pose = "GettingUp" end)
+humanoid.FreeFalling:Connect(function() pose = "FreeFall" end)
+humanoid.FallingDown:Connect(function() pose = "FallingDown" end)
+humanoid.Seated:Connect(function() pose = "Seated" end)
+
+local function replaceLimb(original)
+    local part = Instance.new("Part")
+    part.Name = "New"..original.Name
+    part.Size = original.Size
+    part.Transparency = 1
+    part.Material = Enum.Material.SmoothPlastic
+    part.CFrame = original.CFrame
+    part.Parent = char
+    local weld = Instance.new("ManualWeld")
+    weld.Part0 = original
+    weld.Part1 = part
+    weld.Parent = original
+end
+
+for _, limbName in ipairs({"Left Arm","Right Arm","Left Leg","Right Leg"}) do
+    local limb = char:FindFirstChild(limbName)
+    if limb then replaceLimb(limb) end
+end
+
+RunService.RenderStepped:Connect(function()
+    move(tick())
+end)
+
+
+local ANIMATIONS = {
+    walk = "rbxassetid://161210451",
+    jump = "rbxassetid://165167557",
+    climb = "rbxassetid://161235826",
+    fall = "rbxassetid://165167632",
+    idle = "rbxassetid://161100084"
+}
+
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+if character:FindFirstChild("Animate") then
+    character.Animate:Destroy()
+end
+
+local animator = humanoid:FindFirstChildOfClass("Animator")
+if not animator then
+    animator = Instance.new("Animator")
+    animator.Parent = humanoid
+end
+
+local function loadAnim(id)
+    local anim = Instance.new("Animation")
+    anim.AnimationId = id
+    local track = animator:LoadAnimation(anim)
+    track.Looped = true
+    track.Priority = Enum.AnimationPriority.Action
+    return track
+end
+
+local walkTrack = loadAnim(ANIMATIONS.walk)
+local jumpTrack = loadAnim(ANIMATIONS.jump)
+local climbTrack = loadAnim(ANIMATIONS.climb)
+local fallTrack = loadAnim(ANIMATIONS.fall)
+local idleTrack = loadAnim(ANIMATIONS.idle)
+
+local currentTrack = nil
+
+local function playTrack(track)
+    if currentTrack ~= track then
+        if currentTrack then
+            currentTrack:Stop()
+        end
+        currentTrack = track
+        currentTrack:Play()
+    end
+end
+
+for _, t in pairs(humanoid:GetPlayingAnimationTracks()) do
+    t:Stop()
+end
+
+humanoid.StateChanged:Connect(function(_, newState)
+    if newState == Enum.HumanoidStateType.Jumping then
+        playTrack(jumpTrack)
+    elseif newState == Enum.HumanoidStateType.Climbing then
+        playTrack(climbTrack)
+    elseif newState == Enum.HumanoidStateType.Freefall then
+        playTrack(fallTrack)
+    end
+end)
+
+
+game:GetService("RunService").Heartbeat:Connect(function()
+    if humanoid.MoveDirection.Magnitude > 0 then
+        if humanoid:GetState() == Enum.HumanoidStateType.Running then
+            playTrack(walkTrack)
+        end
+    else
+        if humanoid:GetState() == Enum.HumanoidStateType.Running or humanoid:GetState() == Enum.HumanoidStateType.Physics then
+            playTrack(idleTrack)
+        end
+    end
+end)
+
+humanoid.Died:Connect(function()
+    if currentTrack then
+        currentTrack:Stop()
+    end
+end)
+
+idleTrack:Play()
+currentTrack = idleTrack
